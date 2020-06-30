@@ -1,0 +1,417 @@
+---
+title: "Final Project 274"
+author: "Katie Schmitzer"
+date: "5/23/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages("devtools")
+#devtools::install_github("FinYang/tsdl")
+#install.packages("qpcR")
+library(qpcR)
+library(tsdl)
+#install.packages("tseries")
+library(tseries)
+library(forecast)
+#install.packages("TSA")
+require(TSA)
+#install.packages("GeneCycle")
+```
+
+$\textbf{Get Initial Data}$\newline
+```{r}
+#tsdl
+#for(i in 200:600)  cat("i =", i, attr(tsdl[[i]], "description"), "\n")
+chemical <- ts(tsdl[[508]]) #Chemical process readings every two minutes
+actualvals<-chemical[91:100]
+chem <- chemical[0:90]
+chem[30:40]
+length(chem)
+```
+
+$\textbf{Examine Raw Data}$\newline
+```{r}
+ts.plot(chem) + abline(h=151.16, col = "red", main = "Chemical Process Readings Every Two Minutes in Degrees Fahrenheit")
+mean(chem) # mean is 151.9
+var(chem) # variance is 167.6865
+acf(chem, main =  "ACF for Raw Data", lag.max = 90) # acf has non-zero values at lags 1 and 2 and ones slightly outside the CI after
+pacf(chem, main =  "PACF for Raw Data", lag.max = 90) # pacf has non-zero values at lags 1 and 2 and 20
+adf.test(chem)
+```
+
+$\textbf{Transform the Data}$\newline
+```{r}
+bcTransform <- boxcox(chem ~ as.numeric(1:length(chem))) #graph shows that either a log-transformed data or non-transformed data are within 95% CI
+lambda <- bcTransform$x[which(bcTransform$y == max(bcTransform$y))]
+lambda # ideal lambda = -1.191919
+```
+
+$\textbf{Try -1 For Lambda}$\newline
+```{r}
+lambda = -1 # chose -1 for simplicity and parsimony
+chemneg1 <- (1/lambda)*(chem^lambda - 1)
+ts.plot(chemneg1, gpars = list(ylab = "Transformed Data")) + abline(h= 0.9933702, col = "red")
+mean(chemneg1) # mean is  0.9933702
+var(chemneg1) # variance is 3.073924e-07
+acf(chemneg1, main =  "ACF for Transformed lambda = -1 Data", lag.max = 40) # acf has non-zero values at lags 1 and 2
+pacf(chemneg1, main =  "PACF for Transformed lambda = -1 Data", lag.max = 40) # may be an MA(2) model, non-zero lag at 20
+
+
+adf.test(chemneg1) # data is stationary
+```
+
+$\textbf{Try Log-Data}$\newline
+```{r}
+chemlog <- log(chem)
+ts.plot(chemlog) + abline(h= 5.014343, col = "red")
+mean(chemlog) # mean is  5.019678
+var(chemlog) # variance is 0.007126066
+acf(chemlog, main =  "ACF for Log Data", lag.max =  40) # acf has non-zero values at lags 1 and 2
+pacf(chemlog, main =  "PACF for Log Data", lag.max =  40) # may be an MA(2) model
+```
+
+$\textbf{De-Trend the Data by differencing at lag 1}$\newline
+```{r}
+chemneg1_diff1 <-diff(chemneg1,1) 
+ts.plot(chemneg1_diff1, main = "Differenced at Lag 1")
+mean(chemneg1_diff1) # mean is nearly 0
+var(chemneg1_diff1) #  - variance increased
+acf(chemneg1_diff1, main =  "ACF for Differenced Data") # acf has more non zero lags
+pacf(chemneg1_diff1, main =  "PACF for Differenced Data", lag.max = 40) # pacf has many non zero values
+```
+
+$\textbf{Use Innovation Algorithm}$\newline
+```{r}
+innovations.algorithm <- function(n.max,acvs)
+  {
+    thetas <- matrix(rep(0,n.max^2),nrow=n.max)
+    vs <- rep(0,n.max+1)
+    vs[1] <- acvs[1]
+    for(n in 1:n.max)
+      {
+        thetas[n,n] <- acvs[n+1]/vs[1]
+        if(n>1)
+          {
+            for(k in 1:(n-1))
+              {
+                inner.sum <- acvs[n-k+1]
+                for(j in 0:(k-1))
+                  {
+                    inner.sum <- inner.sum - thetas[k,k-j]*thetas[n,n-j]*vs[j+1]
+                  }
+                thetas[n,n-k] <- inner.sum/vs[k+1]
+              }
+          }
+        vs[n+1] <- acvs[1]
+        for(j in 0:(n-1))
+          {
+            vs[n+1] <- vs[n+1] - thetas[n,n-j]^2*vs[j+1]
+          }
+      }
+    structure(list(thetas=thetas,vs=vs))
+  }
+
+get.sigma.2.n.hs <- function(n,h.max,ts.var,ia.stuff)
+  {
+    thetas <- ia.stuff$thetas
+    vs <- ia.stuff$vs
+    sigma.2.n.hs <- rep(ts.var,h.max)
+    for(h in 1:h.max)
+      {
+        sigma.2.n.hs[h] <- sigma.2.n.hs[h] - sum((thetas[n+h-1,(n+h-1):h])^2*vs[1:n])
+      }
+    sigma.2.n.hs
+  }
+
+
+acvf = acf(chemneg1, plot=FALSE, lag.max = length(chemneg1))$acf[,1,1] * var(chemneg1) 
+m = length(acvf)
+
+
+spec.arma <- function(ar=0,ma=0,var.noise=1,n.freq=500, ...)
+{ 
+    # check causality
+     ar.poly <- c(1, -ar)
+     z.ar <- polyroot(ar.poly)
+     if(any(abs(z.ar) <= 1)) cat("WARNING: Model Not Causal", "\n")  
+    # check invertibility
+     ma.poly <- c(1, ma)
+     z.ma <- polyroot(ma.poly)
+     if(any(abs(z.ma) <= 1)) cat("WARNING: Model Not Invertible", "\n")
+     if(any(abs(z.ma) <= 1) || any(abs(z.ar) <= 1) ) stop("Try Again")
+    #
+    ar.order <- length(ar)
+    ma.order <- length(ma) 
+    # check (near) parameter redundancy [i.e. are any roots (approximately) equal]  
+       for (i in 1:ar.order) {
+       if ( (ar == 0 & ar.order == 1) || (ma == 0 & ma.order ==1) ) break
+       if(any(abs(z.ar[i]-z.ma[1:ma.order]) < 1e-03)) {cat("WARNING: Parameter Redundancy", "\n"); break}
+       }
+    #
+    freq <- seq.int(0, 0.5, length.out = n.freq)
+            cs.ar <- outer(freq, 1:ar.order, function(x, y) cos(2 * 
+                pi * x * y)) %*% ar
+            sn.ar <- outer(freq, 1:ar.order, function(x, y) sin(2 * 
+                pi * x * y)) %*% ar
+            cs.ma <- outer(freq, 1:ma.order, function(x, y) cos(2 * 
+                pi * x * y)) %*% -ma
+            sn.ma <- outer(freq, 1:ma.order, function(x, y) sin(2 * 
+                pi * x * y)) %*% -ma                      
+    spec <- var.noise*((1 - cs.ma)^2 + sn.ma^2)/((1 - cs.ar)^2 + sn.ar^2)
+    spg.out <- list(freq=freq, spec=spec)
+    class(spg.out) <- "spec"
+    plot(spg.out, ci=0, main="", ...)
+    return(invisible(spg.out))
+}
+#chemneg1.ia = innovations.algorithm(m+1, acvf)
+#chemneg1.ia$thetas[3,1:3] 
+```
+
+$\textbf{Fit to an AR Model}$\newline
+```{r}
+fit.ar.yw <- ar(chemneg1, aic = TRUE, order.max = NULL, method = c("yule-walker")) 
+fit.ar.yw # suggests AR(2) with the coefficients : 0.4085  -0.4117  
+0.4085+1.96*2.393e-07
+0.4085-1.96*2.393e-07
+-0.4117+1.96*2.393e-07
+-0.4117-1.96*2.393e-07
+fit.ar.mle <- ar(chemneg1, aic = TRUE, order.max = NULL, method = c("mle")) 
+fit.ar.mle  # suggests AR(2) with the coefficients : 0.4041  -0.4211  
+
+```
+
+$\textbf{Fitting to ARMA Model}$\newline
+```{r}
+aiccs <- matrix(NA, nr = 9, nc = 9)
+dimnames(aiccs) = list(p=0:8, q=0:8)
+for(p in 0:8)
+{
+  for(q in 0:8)
+  {
+aiccs[p+1,q+1] = AICc(arima(chemneg1, order = c(p,0,q), method="ML")) }
+}
+
+aiccs # possible models include ARMA(1,3), ARMA(0,2), ARMA(0,3), ARMA(2,1), ARMA(3,5), ARMA(1,3), ARMA(2,0) even though it has the lowest AICc because it is much too high an order. The ACF and PACF plot suggest an AR(2) model.
+
+min(aiccs) # ARMA(1,3)
+
+auto.arima(chemneg1, stepwise = F, approximation = F, lambda = -1, ic = "aicc")
+```
+
+$\textbf{Trying ARMA(2,0)}$\newline
+```{r}
+arma20 <- arima(chemneg1, order = c(2, 0, 0), method = c("ML"))
+arma20
+fit.ar.mle
+
+mean(residuals(arma20)) 
+plot(residuals(arma20), main = "Residuals of ARMA(2,0) Model")
+Box.test(residuals(arma20), lag = sqrt(90), type = "Ljung-Box", fitdf = 2) 
+Box.test(residuals(arma20), type = "Box-Pierce", lag = sqrt(90), fitdf = 2) 
+Box.test(residuals(arma20)^2, type = "Ljung", lag = sqrt(90), fitdf = 0) 
+
+acf(residuals(arma20),main = "Autocorrelation")
+pacf(residuals(arma20),main = "Partial Autocorrelation")
+residuals(arma20)
+hist(residuals(arma20),main = "Histogram") 
+qqnorm(residuals(arma20))  
+qqline(residuals(arma20),col ="blue")
+shapiro.test(residuals(arma20))
+fit.ar <- ar(residuals(arma20),method="yw")
+fit.ar
+tsdiag(arima(chemneg1, order=c(2,0,0))) 
+```
+
+$\textbf{Trying ARMA(1,3)}$\newline
+```{r}
+arma13 <- arima(chemneg1, order = c(1, 0, 3), method = c("ML"))
+arma13
+-0.6922+1.96*0.1286 #ar1         
+-0.6922-1.96*0.1286
+1.2634+1.96*0.1393 #ma1 
+1.2634-1.96*0.1393
+0.0446+1.96*0.1889 #ma2 contains 0
+0.0446-1.96*0.1889 
+-0.4117+1.96*0.1039 #ma3
+-0.4117-1.96*0.1039 
+
+spec.arma(ar=c( -0.6946),ma=c(1.2634,0.0446,-0.4117)) 
+
+plot(residuals(arma13), main = "Residuals of ARMA(1,3) Model") + abline(h = mean(residuals(arma13)), col = "red")
+mean(residuals(arma13)) 
+Box.test(residuals(arma13), type = "Ljung-Box", lag = sqrt(90), fitdf = 4) 
+Box.test(residuals(arma13), type = "Box-Pierce", lag = sqrt(90), fitdf = 4) 
+Box.test((residuals(arma13))^2, type = "Ljung-Box", lag = sqrt(90), fitdf = 0) 
+
+acf(residuals(arma13),main = "Autocorrelation", lag.max = 40) 
+pacf(residuals(arma13),main = "Partial Autocorrelation", lag.max = 40)
+residuals(arma13)
+hist(residuals(arma13),main = "Histogram") 
+qqnorm(residuals(arma13)) 
+qqline(residuals(arma13),col ="blue")
+shapiro.test(residuals(arma13))
+tsdiag(arima(chemneg1, order=c(1,0,3))) 
+```
+
+$\textbf{Trying ARMA(2,1)}$\newline
+```{r}
+arma21 <- arima(chemneg1, order = c(2, 0, 1), method = c("ML"))
+arma21
+-0.0077+1.96*0.1879 #ar1 contains 0
+-0.0077-1.96*0.1879
+-0.2791+1.96*0.1316
+-0.2791-1.96*0.1316
+0.5145+1.96*0.1875
+0.5145-1.96*0.1875
+
+spec.arma(ar=c( -0.0077,-0.2791),ma=c(0.5145))
+
+plot(residuals(arma21), main = "Residuals of ARMA(2,1) Model")
+mean(residuals(arma21))
+Box.test(residuals(arma21), type = "Ljung-Box", lag = sqrt(90), fitdf = 3) 
+Box.test(residuals(arma21), type = "Box-Pierce", lag = sqrt(90), fitdf = 3)  
+Box.test(residuals(arma21)^2, type = "Ljung-Box", lag = sqrt(90), fitdf = 0) 
+
+acf(residuals(arma21),main = "Autocorrelation")
+pacf(residuals(arma21),main = "Partial Autocorrelation")
+residuals(arma21)
+hist(residuals(arma21),main = "Histogram") 
+qqnorm(residuals(arma21)) 
+qqline(residuals(arma21),col ="blue")
+shapiro.test(residuals(arma21))
+tsdiag(arima(chemneg1, order=c(2,0,1))) 
+```
+
+$\textbf{Trying ARMA(0,3)}$\newline
+```{r}
+arma03 <- arima(chemneg1, order = c(0, 0, 3), method = c("ML"))
+arma03
+0.5137+1.96*0.1086
+0.5137-1.96*0.1086
+-0.2883+1.96*0.1048
+-0.2883-1.96*0.1048
+-0.1797+1.96*0.1007 # ma3 contains 0
+-0.1797-1.96*0.1007
+
+
+spec.arma(ar=c(0),ma=c(0.5137,-0.2883, -0.1797)) 
+
+mean(residuals(arma03)) 
+plot(residuals(arma03), main = "Residuals of ARMA(0,3) Model")
+Box.test(residuals(arma03), lag = sqrt(90), type = "Ljung-Box", fitdf = 3) 
+Box.test(residuals(arma03), type = "Box-Pierce", lag = sqrt(90), fitdf = 3) 
+Box.test(residuals(arma03)^2, type = "Ljung", lag = sqrt(90), fitdf = 0) 
+
+
+acf(residuals(arma03),main = "Autocorrelation")
+pacf(residuals(arma03),main = "Partial Autocorrelation")
+residuals(arma03)
+hist(residuals(arma03),main = "Histogram") 
+qqnorm(residuals(arma03)) 
+qqline(residuals(arma03),col ="blue")
+shapiro.test(residuals(arma03)) 
+fit.ar <- ar(residuals(arma03),method="yw")
+fit.ar
+tsdiag(arima(chemneg1, order=c(0,0,3))) 
+```
+
+$\textbf{Trying ARMA(0,2)}$\newline
+```{r}
+arma02 <- arima(chemneg1, order = c(0, 0, 2), method = c("ML"))
+arma02
+0.4548+1.96*0.1219
+0.4548-1.96*0.1219
+-0.2093+1.96*0.1196 
+-0.2093-1.96*0.1196
+mean(residuals(arma02))
+plot(residuals(arma02), main = "Residuals of ARMA(0,2) Model")
+Box.test(residuals(arma02), type = "Ljung-Box", lag = sqrt(90), fitdf = 2) 
+Box.test(residuals(arma02), type = "Box-Pierce", lag = sqrt(90), fitdf = 2) 
+Box.test(residuals(arma02)^2, type = "Ljung", lag = sqrt(90), fitdf = 0) 
+
+acf(residuals(arma02),main = "Autocorrelation", lag.max = 40)
+pacf(residuals(arma02),main = "Partial Autocorrelation", lag.max = 40)
+residuals(arma02)
+hist(residuals(arma02),main = "Histogram") 
+qqnorm(residuals(arma02)) 
+qqline(residuals(arma02),col ="blue")
+shapiro.test(residuals(arma02)) 
+tsdiag(arima(chemneg1, order=c(0,0,2))) 
+```
+
+$\textbf{Trying ARMA(0,1)}$\newline
+```{r}
+arma01 <- arima(chemneg1, order = c(0, 0, 1), method = c("ML"))
+arma01
+0.6349+1.96*0.0821
+0.6349-1.96*0.0821
+spec.arma(ma=c(0.6349))
+
+mean(residuals(arma01)) 
+plot(residuals(arma01), main = "Residuals of ARMA(0,2) Model")
+Box.test(residuals(arma01), type = "Ljung-Box", lag = sqrt(90), fitdf = 2) 
+Box.test(residuals(arma01), type = "Box-Pierce", lag = sqrt(90), fitdf = 2) 
+Box.test(residuals(arma01)^2, type = "Ljung", lag = sqrt(90), fitdf = 0) 
+
+acf(residuals(arma01),main = "Autocorrelation", lag.max = 40)
+pacf(residuals(arma01),main = "Partial Autocorrelation", lag.max = 40)
+residuals(arma01)
+hist(residuals(arma01),main = "Histogram") 
+qqnorm(residuals(arma01)) 
+qqline(residuals(arma01),col ="blue")
+shapiro.test(residuals(arma01))
+tsdiag(arima(chemneg1, order=c(0,0,2))) 
+```
+
+$\textbf{Predicting 10 Steps Ahead using ARMA(1,3) on transformed data}$\newline
+```{r}
+pred = predict(arma13, n.ahead=10) 
+pred$pred
+ts.plot(chemneg1,xlim=c(0,100)) 
+points(91:100,pred$pred, col = "blue") 
+lines(91:100,pred$pred-1.96*pred$se,lty=2, col = "orange") 
+lines(91:100,pred$pred+1.96*pred$se,lty=2, col = "orange")
+```
+
+$\textbf{Predicting 10 Steps Ahead using ARMA(1,3) on raw data}$\newline
+```{r}
+pred = predict(arma13, n.ahead=10) 
+pred_raw <- -1/(pred$pred-1)
+pred_raw
+utran <- pred$pred+1.96*pred$se
+ltran <- pred$pred-1.96*pred$se
+u <- -1/(utran-1)
+l <- -1/(ltran-1)
+ts.plot(chem,xlim=c(0,100)) 
+points(91:100,pred_raw, col = "red") 
+lines(91:100,u,lty=2, col = "orange") 
+lines(91:100,l,lty=2, col = "orange")
+
+ts.plot(chem,xlim=c(0,100)) 
+points(91:100,pred_raw, col = "red") 
+points(91:100,actualvals, col = "black")
+lines(91:100,u,lty=2, col = "orange") 
+lines(91:100,l,lty=2, col = "orange")
+
+ts.plot(chemical)
+```
+
+$\textbf{Spectral Analysis}$\newline
+```{r}
+periods = periodogram(chemneg1); abline(h=0)
+periods
+
+cpgram(residuals(arma13))
+FREQ = periods$freq[order(periods$spec, decreasing=T)][1] 
+FREQ[1]
+```
+
+```{r}
+library(GeneCycle)
+fisher.g.test(residuals(arma13))
+```
