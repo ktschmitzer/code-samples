@@ -1,7 +1,5 @@
-#!/usr/bin/env python
-# coding: utf-8
 
-# # Coding Algorithms 
+# Numerical Analysis Algorithms 
 
 
 # Forward euler algorithm for differential equations
