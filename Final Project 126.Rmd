@@ -1,0 +1,297 @@
+---
+title: "Final Project"
+author: "Joh Eun Kang, Katherine Schmitzer, Catherine Miao"
+date: "2/22/2019"
+output:
+  pdf_document: default
+---
+```{r}
+airfoil <- read.table("/Users/katie/Documents/UCSB/Winter Quarter 2019/Pstat 126/airfoil_self_noise.dat.txt", header = FALSE)
+library(car) 
+
+```
+
+```{r}
+freq <- airfoil$V1 #frequency
+angle <- airfoil$V2 #angle of attack 
+chord <- airfoil$V3 #chord length 
+vel <- airfoil$V4 #free stream velocity 
+disp <- airfoil$V5 #suction side displacement thickness
+sound <- airfoil$V6 #sound pressure level 
+pairs(~sound+freq + angle + chord + vel + disp)
+summary(freq)
+summary(angle)
+summary(sound)
+summary(chord)
+summary(vel)
+summary(disp)
+avPlots(lm(sound~ freq + angle + chord + vel + disp))
+```
+
+```{r}
+#change vel and disp to categorical variables.
+chord_lv<-as.factor(chord)
+vel_lv<-as.factor(vel) 
+```
+
+```{r}
+mod.0<-lm(sound~1) #no model
+mod.full<-lm(sound~ freq + angle + chord_lv + vel_lv + disp) #full model
+pairs(sound~freq+angle+chord_lv+vel_lv +disp)
+summary(mod.full) #summary of full model -> adj^R2 = 0.5214 , all predictors are important 
+plot(mod.full)
+```
+From pairs(), angle and disp seem to display a log relationship, freq and disp have an inverse log relationship and angle and chorld_lv seem to have a negative relationship.\newline
+From the Global F-test p-value < 2.2e-16, at least one of the predictors is important.\newline
+Adjusted R-squared: 0.5214
+```{r}
+library(leaps)
+# finding a best model using forward method (AIC based).
+forward_aic <-step(mod.0, scope = list(lower = mod.0,upper = mod.full), direction = "forward") 
+```
+With AIC=4710.03, the full model is the best model so far.
+
+```{r}
+# finding a best model using backward method (AIC based).
+backward_aic <-step(mod.full, scope = list(lower = mod.0,upper = mod.full), direction = "backward") 
+```
+full model is the best model so far.
+```{r}
+# finding a best model using stepwise method (AIC based)
+stepwise_aic <- step(mod.0, scope = list(lower = mod.0,upper = mod.full)) 
+```
+full model is preferable.
+```{r}
+# finding a best model using forward method (BIC based).
+# #observations = 1053 
+forward_bic<-step(mod.0, scope = list(lower = mod.0,upper = mod.full), direction = "forward", k = log(1053))
+```
+full model is preferable
+```{r}
+# finding a best model using backward method (BIC based)
+backward_bic<-step(mod.0, scope = list(lower = mod.0,upper = mod.full), direction = "backward", k = log(1053))
+backward_bic 
+```
+only the intercept is deemed important.
+```{r}
+# finding a best model using stepwise method (BIC based)
+stepwise_bic <- step(mod.0, scope = list(lower = mod.0,upper = mod.full),k = log(1053),trace = 0)
+stepwise_bic 
+```
+full model is preferable.
+```{r}
+#regsubet()
+library(leaps)
+mod.reg<-regsubsets(cbind(freq,angle,chord_lv,vel_lv,disp), sound, data = airfoil)
+summary.reg<- summary(mod.reg)
+names(summary.reg) 
+```
+
+```{r}
+# get all possible models from our full model.
+summary.reg$which 
+```
+we observed that the frequency might be the most important predictor in our model.
+```{r}
+summary.reg$adjr2 
+```
+Full model (model 5) has the biggest adjr2 0.5177846, one can consider our full model as the best model.
+
+```{r}
+summary.reg$cp 
+``` 
+Since all other reduced models have Cp much bigger than q = (1+p), we consider our full model as the best model.
+
+```{r}
+summary.reg$bic 
+```
+Since full model has significantly lower bic then all other models, we can consider full model as a best model. 
+```{r}
+summary.reg$rss 
+```
+Full model always has lowest RSS so we normally choose the reduced model that has least rss. However, since there is significant difference between model 4 and full model (35654.58-34419.99 = 1234.59), one can choose full model as a best model. 
+```{r}
+# mod.full= lm(sound~freq+angle+chorld_lv+vel_lv +disp)
+#compare mod.red1 and full model
+
+mod.red1<-lm(sound~freq + angle) 
+anova(mod.red1,mod.full) 
+```
+p-value:2.2e-16 < 0.05, at least one of chord_lv, vel_lv, disp is usful predictor for estimating sound.
+F-value:103.8 >> 8
+Conclusion: prefer to use Model 2 (full model).
+```{r}
+#compare mod.red2 and full model
+mod.red2<-lm(sound~freq + angle+ chord_lv +vel_lv) 
+anova(mod.red2,mod.full) 
+```
+p-value:2.375e-12 < 0.05, disp is useful important predictor for estimating sound.\newline
+F-value:49.983 >> 8\newline
+Conclusion: prefer to use Model 2 (full model).\newline\newline
+
+We conclude that all five predictors are important for estimating sound.\newline
+
+```{r}
+#Residual-Fitted plot
+plot(mod.full,which = 1) 
+```
+Violations: Linearlity (not evenly scattered), Equal variances (pattern exists).\newline
+
+```{r}
+#Q-Q plot
+plot(mod.full, which = 2) 
+```
+Most of the points are on the Q-Q line, one can conlcuse that the residuals are fairly normally distributed.\newline
+```{r}
+# noise on angle
+median(angle) 
+angle.mod <- angle + 5.4
+lm.angle.mod<-lm(sound~freq + angle+ chord_lv +vel_lv +disp)
+summary(lm.angle.mod)
+```
+Since angle has many zeros, we add the median value of angle (5.4) to the angle column. This allows us to test whether the predictors need to be transformed \newline
+```{r}
+# trnasformation on predictors using powerTansform()
+trans.mod <- powerTransform(cbind(freq,angle.mod,disp)~1, airfoil)
+summary(trans.mod) 
+```
+$\textbf{Rounded power}$:freq = 0.00, angle.mod = 0.13 and disp =  0.05. For sake of simplicity, we use $\lambda = 0$ for all of predictors.\newline
+$\textbf{LR test, lambda = (0 0 0)}$: p-value: 0.00059349. Therefore, we do not take the log transformation for all those three predictors. There exists at least one predictor that does not need log transformation.\newline
+$\textbf{LR test, lambda = (1 1 1)}$: p-value:< 2.22e-16. Therefore, one can conclude that at least one predictor that needs log transformation.\newline
+```{r}
+# trial 1
+#log-transformation on disp
+logtrans.disp.lm<-lm(sound ~ freq + angle + chord_lv + vel_lv + log(disp),data = airfoil)
+pairs(~sound + freq + angle + chord_lv + vel_lv + log(disp))
+plot(logtrans.disp.lm) 
+summary(logtrans.disp.lm)
+```
+After testing each predictor, for which one or two should be log-transformed, the most significant impact was when we chose to log transform displacement.
+
+```{r}
+#transform on sound
+boxCox(logtrans.disp.lm) 
+box.logtrans.disp.lm<-lm(sound**2~ freq + angle + chord_lv + vel_lv + log(disp),data = airfoil)
+plot(box.logtrans.disp.lm)
+summary(box.logtrans.disp.lm)
+```
+Adjusted R-squared:  0.5046\newline
+After transform sound with $\lambda = 2$, we get $\textbf{lower Adjusted R-squared}$ and our diagnostic plots do not improve at all. So we decide not to transform on sound.
+
+$\textbf{Adding interaction term(s)}$
+```{r}
+#pairs() to check possibility of interaction terms
+pairs(sound ~ freq + angle + chord_lv + vel_lv + log(disp)) 
+```
+From the scatter plot, one can observe that there might be a correlation between $\textbf{angle and log(disp)}$ and
+chord_lv and log(disp).\newline\newline
+$\textbf{Interaction Term}$
+```{r}
+#adding interaction term angle*log(disp)
+int.1<-lm(sound ~ freq + angle + chord_lv + vel_lv + log(disp) + angle*log(disp))
+plot(int.1) 
+summary(int.1)
+```
+By adding an interaction term angle * log(disp), Adjusted R-squared changed to 0.5158 which is 0.1% greater than the model without interaction term\newline
+```{r}
+#adding interaction term chord_lv*log(disp)
+int.2<-lm(sound ~ freq + angle + chord_lv + vel_lv + log(disp) + chord_lv*log(disp))
+plot(int.2)
+summary(int.2) 
+```
+By adding an interaction term chord_lv*log(disp), Adjusted R-squared changed to 0.5218 which is 1% greater than the model without interaction term\newline\newline
+From adding each interaction term, one can observe some improvements on Adjusted R-squared and residuals-fitted plot. However, evaluating the tradeoff between goodness of fit and model complexity one can say that the model without interaction term is more efficientway to estimate sound.\newline
+
+$\textbf{Influential Points}$: 
+```{r}
+# full model Adjr2 = 0.5124 , log-tansfrom on disp Adjr2 =  0.5126 
+
+#find influention points
+logtrans.disp.lm<-lm(sound ~ freq + angle + chord_lv + vel_lv + log(disp),data = airfoil)
+plot(logtrans.disp.lm) 
+``` 
+From the Residual- Fitted plot, we observed thtat 1165,1045,1031 are the strong candidates for influential points. However, we need to check both cooks distance and high leverge test for the three points.
+```{r}
+# Test for outliers
+outlierTest(logtrans.disp.lm) 
+```
+Form the outlierTest, we observed that 1031 has studentized residual $|-3.822896|$ > 2. Therefore we conclude that 1031 is an outlier. 	
+```{r}
+# Look at leverage and Cook's distance
+n = 1053
+ft.cooks <- cooks.distance(logtrans.disp.lm) 
+which(ft.cooks > 4/(n-11-1))
+```
+```{r}
+influenceIndexPlot(logtrans.disp.lm, id=TRUE) 
+```
+Diagnostic Plots, we observed that 1030 has both hat-value and Cook's distance significantly big and 1217 has biggest cook's distance This means that there will be relatively sigificant changes if we remove those two points from our data set. Therefore, we decide to remove those two points from our data set.
+```{r}
+# removing the influential points and define a new data set "airfoilclean"
+airfoilclean <- airfoil[-c(1030,1217),] 
+
+#resetting the variables 
+n_freq <- airfoilclean$V1 #frequency
+n_angle <- airfoilclean$V2 #frequency
+n_chord <- airfoilclean$V3 #chord length  
+n_vel <- airfoilclean$V4 #free stream velocity 
+n_disp <- airfoilclean$V5 #displacement
+n_sound <- airfoilclean$V6 #sound pressure level (RESPONSE)
+n_angle.mod <- n_angle+5.4
+```
+
+```{r}
+n_chord_lv <- as.factor(n_chord)
+n_vel_lv <- as.factor(n_vel) 
+```
+
+```{r}
+n.mod.full <- lm(n_sound ~ n_freq + n_angle + n_chord_lv + n_vel_lv + log(n_disp))
+plot(n.mod.full)
+summary(n.mod.full) 
+ncvTest(n.mod.full)
+```
+Removing the observations 1030 and 1217, significant code for angle decreases from 0.01707 to 0.00656 and Adjusted R-squared went up from 51.36% to 51.58%. From these changes, we discovered that these two points are indeed “influential” and, thus,it is crucial to exclude them from our dataset.\newline
+However, p-value from non-constant variance test,1.1958e-07 is still less than 0.05.(non-equal variances)\newline\newline
+$\textbf{(WLS) method}$
+```{r}
+# 1  Weight = 1/n.mod.full$fitted.values
+n.mod.full.w1 <- lm(n_sound ~ n_freq + n_angle + n_chord_lv + n_vel_lv + log(n_disp),weights = 1/n.mod.full$fitted.values)
+plot(n.mod.full.w1)
+ncvTest(n.mod.full.w1) 
+```
+When using frequency as a weight, our residuals-fit plot showed constant variance adn our ncvTest also displayed that our model had constant variance. However, in doing so, our normality was ruined. Our Q-Q plot showed great pattern, and our model is clearly not normal anymore. So, we decided to stay with our unweighted model.
+```{r}
+#2  Weight = 1/n_freq
+n.mod.full.w2 <- lm(n_sound ~ n_freq + n_angle + n_chord_lv + n_vel_lv + log(n_disp),weights = 1/n_freq)
+ncvTest(n.mod.full.w2)
+plot(n.mod.full.w2)
+ # fixed constant variance, but it ruined normality
+
+boxCox(n.mod.full.w2)
+summary(n.mod.full.w2)
+
+n.mod.full.w3 <- lm((n_sound**2-1)/2 ~ n_freq + n_angle + n_chord_lv + n_vel_lv + log(n_disp),weights = 1/n_freq)
+summary(n.mod.full.w3)
+plot(n.mod.full.w3)
+```
+This is what we chose as our full model. 
+```{r}
+logn_disp <- log(n_disp)
+n.mod.full <- lm(n_sound ~ n_freq + n_angle + n_chord_lv + n_vel_lv + logn_disp)
+summary(n.mod.full) 
+```
+
+```{r}
+a <- log(0.0153119)
+new <- data.frame(n_freq = 1600, n_angle = 6.778, n_chord_lv="0.3048" , n_vel_lv="71.3"  , logn_disp = a)
+predict(n.mod.full, new, interval = "prediction", level = 0.95) 
+
+summary(sound)
+```
+
+
+```{r}
+plot(disp,sound)
+plot(log(disp),sound)
+```
