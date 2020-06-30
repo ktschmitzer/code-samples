@@ -3,8 +3,6 @@
 
 # # Coding Algorithms 
 
-# In[ ]:
-
 
 # Forward euler algorithm for differential equations
 
@@ -18,8 +16,6 @@ def fwdeuler(a,b,n,alpha,f):
         t = a + (i*h) # updating time step
     return (t,u)
 
-
-# In[ ]:
 
 
 # Trapezoid method for differential equations
@@ -47,9 +43,6 @@ def trapezoid(a,b,n,alpha,f, tol = .0001, M = 30):
     return(t,u)
 
 
-# In[ ]:
-
-
 # Leapfrog method for differential equations
 
 def leapfrog(a,b,n,alpha,f): 
@@ -64,9 +57,6 @@ def leapfrog(a,b,n,alpha,f):
         u = u1
         u1 = unext
     return (t,u)
-
-
-# In[ ]:
 
 
 # ADI Method for boundary value problems 
@@ -131,9 +121,6 @@ def ADI(d, t, sigma, timesteps, spacesteps, f): # spacesteps and timesteps are t
     return solution 
 
 
-# In[ ]:
-
-
 # Runge Kutta 4 Scheme
 
 def rungekutta4(a,b,n,x,f,usolution):
@@ -181,9 +168,6 @@ def rungekutta2(a,b,n,x,f,usolution):
     return(k,max(earray))  
 
 
-# In[ ]:
-
-
 # Forward Time, Forward Space Wave Equation Implementation
 
 def FTFS(a, b, T, timesteps, spacesteps, f):
@@ -217,10 +201,7 @@ def FTFS(a, b, T, timesteps, spacesteps, f):
             x = solution[i,:]
     return solution
 
-
-# In[ ]:
-
-
+                
 # Upwind Scheme Wave Equation Implementation
 
 def upwind(a, b, T, timesteps, spacesteps, f):
